@@ -50,9 +50,11 @@ type Sealing struct {
 	sc      SectorIDCounter
 	verif   ffiwrapper.Verifier
 	tktFn   TicketFn
+
+	pcp PreCommitPolicy
 }
 
-func New(api SealingAPI, events Events, maddr address.Address, worker address.Address, ds datastore.Batching, sealer sectorstorage.SectorManager, sc SectorIDCounter, verif ffiwrapper.Verifier, tktFn TicketFn) *Sealing {
+func New(api SealingAPI, events Events, maddr address.Address, worker address.Address, ds datastore.Batching, sealer sectorstorage.SectorManager, sc SectorIDCounter, verif ffiwrapper.Verifier, tktFn TicketFn, pcp PreCommitPolicy) *Sealing {
 	s := &Sealing{
 		api:    api,
 		events: events,
@@ -63,6 +65,7 @@ func New(api SealingAPI, events Events, maddr address.Address, worker address.Ad
 		sc:     sc,
 		verif:  verif,
 		tktFn:  tktFn,
+		pcp:    pcp,
 	}
 
 	s.sectors = statemachine.New(namespace.Wrap(ds, datastore.NewKey(SectorStorePrefix)), s, SectorInfo{})
