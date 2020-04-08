@@ -69,6 +69,10 @@ func checkPieces(ctx context.Context, si SectorInfo, api SealingAPI) error {
 	return nil
 }
 
+func CheckPieces(ctx context.Context, si SectorInfo, api SealingAPI) error {
+	return checkPieces(ctx, si, api)
+}
+
 // checkPrecommit checks that data commitment generated in the sealing process
 //  matches pieces, and that the seal ticket isn't expired
 func checkPrecommit(ctx context.Context, maddr address.Address, si SectorInfo, tok TipSetToken, height abi.ChainEpoch, api SealingAPI) (err error) {
@@ -98,6 +102,10 @@ func checkPrecommit(ctx context.Context, maddr address.Address, si SectorInfo, t
 	}
 
 	return nil
+}
+
+func CheckPrecommit(ctx context.Context, maddr address.Address, si SectorInfo, tok TipSetToken, height abi.ChainEpoch, api SealingAPI) (err error) {
+	return checkPrecommit(ctx, maddr, si, tok, height, api)
 }
 
 func (m *Sealing) checkCommit(ctx context.Context, si SectorInfo, proof []byte, tok TipSetToken) (err error) {
@@ -162,4 +170,13 @@ func (m *Sealing) checkCommit(ctx context.Context, si SectorInfo, proof []byte, 
 	}
 
 	return nil
+}
+
+func CheckCommit(ctx context.Context, api SealingAPI, maddr address.Address, verif ffiwrapper.Verifier, si SectorInfo, proof []byte, tok TipSetToken) (err error) {
+	m := Sealing{
+		api:   api,
+		maddr: maddr,
+		verif: verif,
+	}
+	return m.checkCommit(ctx, si, proof, tok)
 }
