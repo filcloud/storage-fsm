@@ -127,7 +127,7 @@ func (m *Sealing) checkCommit(ctx context.Context, si SectorInfo, proof []byte, 
 	}
 
 	ok, err := m.verif.VerifySeal(abi.SealVerifyInfo{
-		SectorID:              m.minerSector(si.SectorNumber),
+		SectorID:              m.MinerSector(si.SectorNumber),
 		SealedCID:             pci.Info.SealedCID,
 		RegisteredProof:       spt,
 		Proof:                 proof,
