@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/xerrors"
 
-	statemachine "github.com/filecoin-project/go-statemachine"
+	"github.com/filecoin-project/go-statemachine"
 	"github.com/filecoin-project/specs-actors/actors/abi"
 )
 
@@ -35,14 +35,23 @@ var fsmPlanners = map[SectorState]func(events []statemachine.Event, state *Secto
 	UndefinedSectorState: planOne(on(SectorStart{}, Packing)),
 	Packing:              planOne(on(SectorPacked{}, PreCommit1)),
 	PreCommit1: planOne(
-		on(SectorPreCommit1{}, PreCommit2),
+		on(SectorPreCommit1{}, FinishPreCommit1),
+		on(SectorFinishPreCommit1{}, PreCommit2), // skip precommit1 and use previous result
 		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
 		on(SectorPackingFailed{}, PackingFailed),
 	),
+	FinishPreCommit1: planOne(
+		on(SectorFinishPreCommit1{}, PreCommit2), // wait for external send
+		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
+	),
 	PreCommit2: planOne(
-		on(SectorPreCommit2{}, PreCommitting),
+		on(SectorPreCommit2{}, FinishPreCommit2),
 		on(SectorSealPreCommit2Failed{}, SealPreCommit2Failed),
 		on(SectorPackingFailed{}, PackingFailed),
+	),
+	FinishPreCommit2: planOne(
+		on(SectorFinishPreCommit2{}, PreCommitting), // wait for external send
+		on(SectorSealPreCommit2Failed{}, SealPreCommit2Failed),
 	),
 	PreCommitting: planOne(
 		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
@@ -55,8 +64,25 @@ var fsmPlanners = map[SectorState]func(events []statemachine.Event, state *Secto
 		on(SectorPreCommitLanded{}, WaitSeed),
 	),
 	WaitSeed: planOne(
-		on(SectorSeedReady{}, Committing),
+		on(SectorSeedReady{}, Commit1),
 		on(SectorChainPreCommitFailed{}, PreCommitFailed),
+	),
+	Commit1: planOne(
+		on(SectorCommit1{}, FinishCommit1),
+		on(SectorFinishCommit1{}, Commit2), // skip commit1 and use previous result
+		on(SectorComputeProofFailed{}, ComputeProofFailed),
+	),
+	FinishCommit1: planOne(
+		on(SectorFinishCommit1{}, Commit2), // wait for external send
+		on(SectorComputeProofFailed{}, ComputeProofFailed),
+	),
+	Commit2: planOne(
+		on(SectorCommit2{}, FinishCommit2),
+		on(SectorComputeProofFailed{}, ComputeProofFailed),
+	),
+	FinishCommit2: planOne(
+		on(SectorFinishCommit2{}, Committing), // wait for external send
+		on(SectorComputeProofFailed{}, ComputeProofFailed),
 	),
 	Committing: planCommitting,
 	CommitWait: planOne(
@@ -88,14 +114,14 @@ var fsmPlanners = map[SectorState]func(events []statemachine.Event, state *Secto
 		on(SectorPreCommitLanded{}, WaitSeed),
 	),
 	ComputeProofFailed: planOne(
-		on(SectorRetryComputeProof{}, Committing),
+		on(SectorRetryComputeProof{}, Commit1),
 		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
 	),
 	CommitFailed: planOne(
 		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
 		on(SectorRetryWaitSeed{}, WaitSeed),
-		on(SectorRetryComputeProof{}, Committing),
-		on(SectorRetryInvalidProof{}, Committing),
+		on(SectorRetryComputeProof{}, Commit1),
+		on(SectorRetryInvalidProof{}, Commit1),
 		on(SectorRetryPreCommitWait{}, PreCommitWait),
 	),
 	FinalizeFailed: planOne(
@@ -113,7 +139,15 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 	// First process all events
 
 	for _, event := range events {
-		e, err := json.Marshal(event)
+		// Override event to avoid too long marshalled message
+		event2 := event
+		if _, ok := event2.User.(SectorFinishPreCommit1); ok {
+			event2.User = SectorFinishPreCommit1{PreCommit1Out:[]byte("ellipsis...")}
+		} else if _, ok := event2.User.(SectorFinishCommit1); ok {
+			event2.User = SectorFinishCommit1{Commit1Out: []byte("ellipsis...")}
+		}
+
+		e, err := json.Marshal(event2)
 		if err != nil {
 			log.Errorf("marshaling event for logging: %+v", err)
 			continue
@@ -130,6 +164,10 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 		}
 
 		state.Log = append(state.Log, l)
+
+		if len(state.Log) > 50 {
+			state.Log = state.Log[len(state.Log)-50:]
+		}
 	}
 
 	p := fsmPlanners[state.State]
@@ -193,14 +231,26 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 		return m.handlePacking, nil
 	case PreCommit1:
 		return m.handlePreCommit1, nil
+	case FinishPreCommit1:
+		log.Infof("Start FinishPreCommit1 sector %d", state.SectorNumber)
 	case PreCommit2:
 		return m.handlePreCommit2, nil
+	case FinishPreCommit2:
+		log.Infof("Start FinishPreCommit2 sector %d", state.SectorNumber)
 	case PreCommitting:
 		return m.handlePreCommitting, nil
 	case PreCommitWait:
 		return m.handlePreCommitWait, nil
 	case WaitSeed:
 		return m.handleWaitSeed, nil
+	case Commit1:
+		return m.handleCommit1, nil
+	case FinishCommit1:
+		log.Infof("Start FinishCommit1 sector %d", state.SectorNumber)
+	case Commit2:
+		return m.handleCommit2, nil
+	case FinishCommit2:
+		log.Infof("Start FinishCommit2 sector %d", state.SectorNumber)
 	case Committing:
 		return m.handleCommitting, nil
 	case CommitWait:
@@ -260,7 +310,7 @@ func planCommitting(events []statemachine.Event, state *SectorInfo) error {
 			}
 			log.Warnf("planCommitting: commit Seed changed")
 			e.apply(state)
-			state.State = Committing
+			state.State = Commit1
 			return nil
 		case SectorComputeProofFailed:
 			state.State = ComputeProofFailed

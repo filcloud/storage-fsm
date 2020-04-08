@@ -6,7 +6,6 @@ import (
 
 	"golang.org/x/xerrors"
 
-	"github.com/filecoin-project/sector-storage/ffiwrapper"
 	"github.com/filecoin-project/specs-actors/actors/abi"
 
 	nr "github.com/filecoin-project/storage-fsm/lib/nullreader"
@@ -16,7 +15,7 @@ func (m *Sealing) pledgeReader(size abi.UnpaddedPieceSize) io.Reader {
 	return io.LimitReader(&nr.Reader{}, int64(size))
 }
 
-func (m *Sealing) pledgeSector(ctx context.Context, sectorID abi.SectorID, existingPieceSizes []abi.UnpaddedPieceSize, sizes ...abi.UnpaddedPieceSize) ([]abi.PieceInfo, error) {
+func (m *Sealing) PledgeSectorWithNull(ctx context.Context, sectorID abi.SectorID, existingPieceSizes []abi.UnpaddedPieceSize, sizes ...abi.UnpaddedPieceSize) ([]abi.PieceInfo, error) {
 	if len(sizes) == 0 {
 		return nil, nil
 	}
@@ -38,49 +37,21 @@ func (m *Sealing) pledgeSector(ctx context.Context, sectorID abi.SectorID, exist
 	return out, nil
 }
 
-func (m *Sealing) PledgeSector() error {
-	go func() {
-		ctx := context.TODO() // we can't use the context from command which invokes
-		// this, as we run everything here async, and it's cancelled when the
-		// command exits
+func (m *Sealing) PledgeSectorWithExisting(ctx context.Context, sectorID abi.SectorID) ([]abi.PieceInfo, error) {
+	log.Infof("Pledge %d using existing", sectorID)
 
-		size := abi.PaddedPieceSize(m.sealer.SectorSize()).Unpadded()
+	size := abi.PaddedPieceSize(m.sealer.SectorSize()).Unpadded()
 
-		rt, err := ffiwrapper.SealProofTypeFromSectorSize(m.sealer.SectorSize())
-		if err != nil {
-			log.Error(err)
-			return
-		}
+	// Here size 0 means using existing unsealed sector
+	ppi, err := m.sealer.AddPiece(ctx, sectorID, []abi.UnpaddedPieceSize{}, 0, m.pledgeReader(size))
+	if err != nil {
+		return nil, xerrors.Errorf("add piece using existing: %w", err)
+	}
+	return []abi.PieceInfo{
+		{Size: ppi.Size, PieceCID: ppi.PieceCID},
+	}, nil
+}
 
-		sid, err := m.sc.Next()
-		if err != nil {
-			log.Errorf("%+v", err)
-			return
-		}
-		err = m.sealer.NewSector(ctx, m.minerSector(sid))
-		if err != nil {
-			log.Errorf("%+v", err)
-			return
-		}
-
-		pieces, err := m.pledgeSector(ctx, m.minerSector(sid), []abi.UnpaddedPieceSize{}, size)
-		if err != nil {
-			log.Errorf("%+v", err)
-			return
-		}
-
-		ps := make([]Piece, len(pieces))
-		for idx := range ps {
-			ps[idx] = Piece{
-				Piece:    pieces[idx],
-				DealInfo: nil,
-			}
-		}
-
-		if err := m.newSector(sid, rt, ps); err != nil {
-			log.Errorf("%+v", err)
-			return
-		}
-	}()
-	return nil
+func (m *Sealing) PledgeSector(useExisting ...bool) error {
+	return xerrors.New("not implemented")
 }

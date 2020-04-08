@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/filecoin-project/specs-storage/storage"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
@@ -11,10 +12,10 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-address"
-	padreader "github.com/filecoin-project/go-padreader"
-	statemachine "github.com/filecoin-project/go-statemachine"
-	sectorstorage "github.com/filecoin-project/sector-storage"
+	"github.com/filecoin-project/go-padreader"
+	"github.com/filecoin-project/go-statemachine"
 	"github.com/filecoin-project/sector-storage/ffiwrapper"
+	"github.com/filecoin-project/sector-storage/storiface"
 	"github.com/filecoin-project/specs-actors/actors/abi"
 	"github.com/filecoin-project/specs-actors/actors/abi/big"
 	"github.com/filecoin-project/specs-actors/actors/builtin/market"
@@ -42,13 +43,32 @@ type SealingAPI interface {
 	ChainReadObj(context.Context, cid.Cid) ([]byte, error)
 }
 
+type SectorManager interface {
+	SetSealing(sealing *Sealing)
+
+	SectorSize() abi.SectorSize
+
+	ReadPiece(context.Context, io.Writer, abi.SectorID, storiface.UnpaddedByteIndex, abi.UnpaddedPieceSize, abi.SealRandomness, cid.Cid) error
+
+	SealPreCommit1(ctx context.Context, sector abi.SectorID, ticket abi.SealRandomness, pieces []abi.PieceInfo) error
+	SealPreCommit2(ctx context.Context, sector abi.SectorID, pc1o storage.PreCommit1Out) error
+	SealCommit1(ctx context.Context, sector abi.SectorID, ticket abi.SealRandomness, seed abi.InteractiveSealRandomness, pieces []abi.PieceInfo, cids storage.SectorCids) error
+	SealCommit2(ctx context.Context, sector abi.SectorID, c1o storage.Commit1Out) error
+	FinalizeSector(ctx context.Context, sector abi.SectorID) error
+
+	storage.Storage
+	storage.Prover
+
+	CheckProvable(ctx context.Context, spt abi.RegisteredSealProof, sectors []abi.SectorID) ([]abi.SectorID, error)
+}
+
 type Sealing struct {
 	api    SealingAPI
 	events Events
 
 	maddr address.Address
 
-	sealer  sectorstorage.SectorManager
+	sealer  SectorManager
 	sectors *statemachine.StateGroup
 	sc      SectorIDCounter
 	verif   ffiwrapper.Verifier
@@ -56,7 +76,7 @@ type Sealing struct {
 	pcp PreCommitPolicy
 }
 
-func New(api SealingAPI, events Events, maddr address.Address, ds datastore.Batching, sealer sectorstorage.SectorManager, sc SectorIDCounter, verif ffiwrapper.Verifier, pcp PreCommitPolicy) *Sealing {
+func New(api SealingAPI, events Events, maddr address.Address, ds datastore.Batching, sealer SectorManager, sc SectorIDCounter, verif ffiwrapper.Verifier, pcp PreCommitPolicy) *Sealing {
 	s := &Sealing{
 		api:    api,
 		events: events,
@@ -71,6 +91,10 @@ func New(api SealingAPI, events Events, maddr address.Address, ds datastore.Batc
 	s.sectors = statemachine.New(namespace.Wrap(ds, datastore.NewKey(SectorStorePrefix)), s, SectorInfo{})
 
 	return s
+}
+
+func (m *Sealing) Sectors() *statemachine.StateGroup {
+	return m.sectors
 }
 
 func (m *Sealing) Run(ctx context.Context) error {
@@ -96,7 +120,7 @@ func (m *Sealing) AllocatePiece(size abi.UnpaddedPieceSize) (sectorID abi.Sector
 		return 0, 0, xerrors.Errorf("getting sector number: %w", err)
 	}
 
-	err = m.sealer.NewSector(context.TODO(), m.minerSector(sid)) // TODO: Put more than one thing in a sector
+	err = m.sealer.NewSector(context.TODO(), m.MinerSector(sid)) // TODO: Put more than one thing in a sector
 	if err != nil {
 		return 0, 0, xerrors.Errorf("initializing sector: %w", err)
 	}
@@ -108,7 +132,7 @@ func (m *Sealing) AllocatePiece(size abi.UnpaddedPieceSize) (sectorID abi.Sector
 func (m *Sealing) SealPiece(ctx context.Context, size abi.UnpaddedPieceSize, r io.Reader, sectorID abi.SectorNumber, d DealInfo) error {
 	log.Infof("Seal piece for deal %d", d.DealID)
 
-	ppi, err := m.sealer.AddPiece(ctx, m.minerSector(sectorID), []abi.UnpaddedPieceSize{}, size, r)
+	ppi, err := m.sealer.AddPiece(ctx, m.MinerSector(sectorID), []abi.UnpaddedPieceSize{}, size, r)
 	if err != nil {
 		return xerrors.Errorf("adding piece to sector: %w", err)
 	}
@@ -118,7 +142,7 @@ func (m *Sealing) SealPiece(ctx context.Context, size abi.UnpaddedPieceSize, r i
 		return xerrors.Errorf("bad sector size: %w", err)
 	}
 
-	return m.newSector(sectorID, rt, []Piece{
+	return m.NewSector(sectorID, rt, []Piece{
 		{
 			Piece:    ppi,
 			DealInfo: &d,
@@ -129,7 +153,7 @@ func (m *Sealing) SealPiece(ctx context.Context, size abi.UnpaddedPieceSize, r i
 // newSector accepts a slice of pieces which will have a deal associated with
 // them (in the event of a storage deal) or no deal (in the event of sealing
 // garbage data)
-func (m *Sealing) newSector(sid abi.SectorNumber, rt abi.RegisteredSealProof, pieces []Piece) error {
+func (m *Sealing) NewSector(sid abi.SectorNumber, rt abi.RegisteredSealProof, pieces []Piece) error {
 	log.Infof("Start sealing %d", sid)
 	return m.sectors.Send(uint64(sid), SectorStart{
 		ID:         sid,
@@ -138,7 +162,7 @@ func (m *Sealing) newSector(sid abi.SectorNumber, rt abi.RegisteredSealProof, pi
 	})
 }
 
-func (m *Sealing) minerSector(num abi.SectorNumber) abi.SectorID {
+func (m *Sealing) MinerSector(num abi.SectorNumber) abi.SectorID {
 	mid, err := address.IDFromAddress(m.maddr)
 	if err != nil {
 		panic(err)
@@ -152,4 +176,8 @@ func (m *Sealing) minerSector(num abi.SectorNumber) abi.SectorID {
 
 func (m *Sealing) Address() address.Address {
 	return m.maddr
+}
+
+func (m *Sealing) SectorIDCounter() SectorIDCounter {
+	return m.sc
 }

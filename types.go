@@ -56,9 +56,10 @@ type SectorInfo struct {
 	Pieces []Piece
 
 	// PreCommit1
-	TicketValue   abi.SealRandomness
-	TicketEpoch   abi.ChainEpoch
-	PreCommit1Out storage.PreCommit1Out
+	TicketValue           abi.SealRandomness
+	TicketEpoch           abi.ChainEpoch
+	PreCommit1Out         storage.PreCommit1Out
+	PreviousPreCommit1Out bool
 
 	// PreCommit2
 	CommD *cid.Cid
@@ -73,6 +74,10 @@ type SectorInfo struct {
 	// WaitSeed
 	SeedValue abi.InteractiveSealRandomness
 	SeedEpoch abi.ChainEpoch
+
+	// Commit1
+	Commit1Out []byte
+	PreviousCommit1Out bool
 
 	// Committing
 	CommitMessage *cid.Cid
