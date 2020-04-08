@@ -38,7 +38,22 @@ func (m *Sealing) pledgeSector(ctx context.Context, sectorID abi.SectorID, exist
 	return out, nil
 }
 
-func (m *Sealing) PledgeSector() error {
+func (m *Sealing) pledgeSectorUseExisting(ctx context.Context, sectorID abi.SectorID) ([]abi.PieceInfo, error) {
+	log.Infof("Pledge %d using existing", sectorID)
+
+	size := abi.PaddedPieceSize(m.sealer.SectorSize()).Unpadded()
+
+	// Here size 0 means using existing unsealed sector
+	ppi, err := m.sealer.AddPiece(ctx, sectorID, []abi.UnpaddedPieceSize{}, 0, m.pledgeReader(size))
+	if err != nil {
+		return nil, xerrors.Errorf("add piece using existing: %w", err)
+	}
+	return []abi.PieceInfo{
+		{Size: ppi.Size, PieceCID: ppi.PieceCID},
+	}, nil
+}
+
+func (m *Sealing) PledgeSector(useExisting ...bool) error {
 	go func() {
 		ctx := context.TODO() // we can't use the context from command which invokes
 		// this, as we run everything here async, and it's cancelled when the
@@ -63,7 +78,12 @@ func (m *Sealing) PledgeSector() error {
 			return
 		}
 
-		pieces, err := m.pledgeSector(ctx, m.minerSector(sid), []abi.UnpaddedPieceSize{}, size)
+		var pieces []abi.PieceInfo
+		if len(useExisting) > 0 && useExisting[0] {
+			pieces, err = m.pledgeSectorUseExisting(ctx, m.minerSector(sid))
+		} else {
+			pieces, err = m.pledgeSector(ctx, m.minerSector(sid), []abi.UnpaddedPieceSize{}, size)
+		}
 		if err != nil {
 			log.Errorf("%+v", err)
 			return

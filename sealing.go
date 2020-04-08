@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/filecoin-project/specs-storage/storage"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
@@ -11,9 +12,8 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-address"
-	padreader "github.com/filecoin-project/go-padreader"
-	statemachine "github.com/filecoin-project/go-statemachine"
-	sectorstorage "github.com/filecoin-project/sector-storage"
+	"github.com/filecoin-project/go-padreader"
+	"github.com/filecoin-project/go-statemachine"
 	"github.com/filecoin-project/sector-storage/ffiwrapper"
 	"github.com/filecoin-project/specs-actors/actors/abi"
 	"github.com/filecoin-project/specs-actors/actors/abi/big"
@@ -41,13 +41,30 @@ type SealingAPI interface {
 	ChainReadObj(context.Context, cid.Cid) ([]byte, error)
 }
 
+type SectorManager interface {
+	SetSealing(sealing *Sealing)
+
+	SectorSize() abi.SectorSize
+
+	ReadPieceFromSealedSector(context.Context, abi.SectorID, ffiwrapper.UnpaddedByteIndex, abi.UnpaddedPieceSize, abi.SealRandomness, cid.Cid) (io.ReadCloser, error)
+
+	SealPreCommit1(ctx context.Context, sector abi.SectorID, ticket abi.SealRandomness, pieces []abi.PieceInfo) error
+	SealPreCommit2(ctx context.Context, sector abi.SectorID, pc1o storage.PreCommit1Out) error
+	SealCommit1(ctx context.Context, sector abi.SectorID, ticket abi.SealRandomness, seed abi.InteractiveSealRandomness, pieces []abi.PieceInfo, cids storage.SectorCids) error
+	SealCommit2(ctx context.Context, sector abi.SectorID, c1o storage.Commit1Out) error
+	FinalizeSector(ctx context.Context, sector abi.SectorID) error
+
+	storage.Storage
+	storage.Prover
+}
+
 type Sealing struct {
 	api    SealingAPI
 	events Events
 
 	maddr address.Address
 
-	sealer  sectorstorage.SectorManager
+	sealer  SectorManager
 	sectors *statemachine.StateGroup
 	sc      SectorIDCounter
 	verif   ffiwrapper.Verifier
@@ -55,7 +72,7 @@ type Sealing struct {
 	pcp PreCommitPolicy
 }
 
-func New(api SealingAPI, events Events, maddr address.Address, ds datastore.Batching, sealer sectorstorage.SectorManager, sc SectorIDCounter, verif ffiwrapper.Verifier, pcp PreCommitPolicy) *Sealing {
+func New(api SealingAPI, events Events, maddr address.Address, ds datastore.Batching, sealer SectorManager, sc SectorIDCounter, verif ffiwrapper.Verifier, pcp PreCommitPolicy) *Sealing {
 	s := &Sealing{
 		api:    api,
 		events: events,
@@ -70,6 +87,10 @@ func New(api SealingAPI, events Events, maddr address.Address, ds datastore.Batc
 	s.sectors = statemachine.New(namespace.Wrap(ds, datastore.NewKey(SectorStorePrefix)), s, SectorInfo{})
 
 	return s
+}
+
+func (m *Sealing) Sectors() *statemachine.StateGroup {
+	return m.sectors
 }
 
 func (m *Sealing) Run(ctx context.Context) error {
