@@ -75,32 +75,45 @@ type SectorPackingFailed struct{ error }
 func (evt SectorPackingFailed) apply(*SectorInfo) {}
 
 type SectorPreCommit1 struct {
-	PreCommit1Out storage.PreCommit1Out
 	TicketValue   abi.SealRandomness
 	TicketEpoch   abi.ChainEpoch
 }
 
 func (evt SectorPreCommit1) apply(state *SectorInfo) {
-	state.PreCommit1Out = evt.PreCommit1Out
 	state.TicketEpoch = evt.TicketEpoch
 	state.TicketValue = evt.TicketValue
 }
 
+type SectorFinishPreCommit1 struct {
+	PreCommit1Out storage.PreCommit1Out
+}
+
+func (evt SectorFinishPreCommit1) apply(state *SectorInfo) {
+	state.PreCommit1Out = evt.PreCommit1Out
+}
+
 type SectorPreCommit2 struct {
+}
+
+func (evt SectorPreCommit2) apply(state *SectorInfo) {
+}
+
+type SectorFinishPreCommit2 struct {
 	Sealed   cid.Cid
 	Unsealed cid.Cid
 }
 
-func (evt SectorPreCommit2) apply(state *SectorInfo) {
+func (evt SectorFinishPreCommit2) apply(state *SectorInfo) {
 	commd := evt.Unsealed
 	state.CommD = &commd
 	commr := evt.Sealed
 	state.CommR = &commr
 }
 
-type SectorSealPreCommitFailed struct{ error }
+type SectorSealPreCommitFailed struct{ Err error }
 
-func (evt SectorSealPreCommitFailed) FormatError(xerrors.Printer) (next error) { return evt.error }
+func (evt SectorSealPreCommitFailed) Error() string { return evt.Err.Error() }
+func (evt SectorSealPreCommitFailed) FormatError(xerrors.Printer) (next error) { return evt.Err }
 func (evt SectorSealPreCommitFailed) apply(si *SectorInfo) {
 	si.InvalidProofs = 0 // reset counter
 }
@@ -128,9 +141,10 @@ func (evt SectorSeedReady) apply(state *SectorInfo) {
 	state.SeedValue = evt.SeedValue
 }
 
-type SectorComputeProofFailed struct{ error }
+type SectorComputeProofFailed struct{ Err error }
 
-func (evt SectorComputeProofFailed) FormatError(xerrors.Printer) (next error) { return evt.error }
+func (evt SectorComputeProofFailed) Error() string { return evt.Err.Error() }
+func (evt SectorComputeProofFailed) FormatError(xerrors.Printer) (next error) { return evt.Err }
 func (evt SectorComputeProofFailed) apply(*SectorInfo)                        {}
 
 type SectorCommitFailed struct{ error }
@@ -138,13 +152,39 @@ type SectorCommitFailed struct{ error }
 func (evt SectorCommitFailed) FormatError(xerrors.Printer) (next error) { return evt.error }
 func (evt SectorCommitFailed) apply(*SectorInfo)                        {}
 
-type SectorCommitted struct {
-	Message cid.Cid
+type SectorCommit1 struct {
+}
+
+func (evt SectorCommit1) apply(state *SectorInfo) {
+}
+
+type SectorFinishCommit1 struct {
+	Commit1Out []byte
+}
+
+func (evt SectorFinishCommit1) apply(state *SectorInfo) {
+	state.Commit1Out = evt.Commit1Out
+}
+
+type SectorCommit2 struct {
+}
+
+func (evt SectorCommit2) apply(state *SectorInfo) {
+}
+
+type SectorFinishCommit2 struct {
 	Proof   []byte
 }
 
-func (evt SectorCommitted) apply(state *SectorInfo) {
+func (evt SectorFinishCommit2) apply(state *SectorInfo) {
 	state.Proof = evt.Proof
+}
+
+type SectorCommitted struct {
+	Message cid.Cid
+}
+
+func (evt SectorCommitted) apply(state *SectorInfo) {
 	state.CommitMessage = &evt.Message
 }
 
