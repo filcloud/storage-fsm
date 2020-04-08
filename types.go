@@ -54,6 +54,7 @@ type Log struct {
 
 type SectorInfo struct {
 	State        SectorState
+	StateID      uint64 // state change identifier
 	SectorNumber abi.SectorNumber
 
 	SectorType abi.RegisteredSealProof
@@ -62,9 +63,10 @@ type SectorInfo struct {
 	Pieces []Piece
 
 	// PreCommit1
-	TicketValue   abi.SealRandomness
-	TicketEpoch   abi.ChainEpoch
-	PreCommit1Out storage.PreCommit1Out
+	TicketValue            abi.SealRandomness
+	TicketEpoch            abi.ChainEpoch
+	PreCommit1Out          storage.PreCommit1Out
+	PreCommit1OutTimestamp int64
 
 	// PreCommit2
 	CommD *cid.Cid
@@ -82,6 +84,9 @@ type SectorInfo struct {
 	SeedValue abi.InteractiveSealRandomness
 	SeedEpoch abi.ChainEpoch
 
+	// Commit1
+	Commit1Out []byte
+
 	// Committing
 	CommitMessage *cid.Cid
 	InvalidProofs uint64 // failed proof computations (doesn't validate with proof inputs; can't compute)
@@ -92,6 +97,7 @@ type SectorInfo struct {
 	// Debug
 	LastErr string
 
+	// Deprecated
 	Log []Log
 }
 
@@ -101,6 +107,10 @@ func (t *SectorInfo) pieceInfos() []abi.PieceInfo {
 		out[i] = p.Piece
 	}
 	return out
+}
+
+func (t *SectorInfo) PieceInfos() []abi.PieceInfo {
+	return t.pieceInfos()
 }
 
 func (t *SectorInfo) dealIDs() []abi.DealID {
@@ -114,12 +124,20 @@ func (t *SectorInfo) dealIDs() []abi.DealID {
 	return out
 }
 
+func (t *SectorInfo) DealIDs() []abi.DealID {
+	return t.dealIDs()
+}
+
 func (t *SectorInfo) existingPieceSizes() []abi.UnpaddedPieceSize {
 	out := make([]abi.UnpaddedPieceSize, len(t.Pieces))
 	for i, p := range t.Pieces {
 		out[i] = p.Piece.Size.Unpadded()
 	}
 	return out
+}
+
+func (t *SectorInfo) ExistingPieceSizes() []abi.UnpaddedPieceSize {
+	return t.existingPieceSizes()
 }
 
 func (t *SectorInfo) hasDeals() bool {
@@ -167,6 +185,10 @@ func (t *SectorInfo) keepUnsealedRanges(invert bool) []storage.Range {
 	}
 
 	return out
+}
+
+func (t *SectorInfo) KeepUnsealedRanges(invert bool) []storage.Range {
+	return t.keepUnsealedRanges(invert)
 }
 
 type SectorIDCounter interface {
