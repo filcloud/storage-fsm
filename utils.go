@@ -42,6 +42,10 @@ func fillersFromRem(in abi.UnpaddedPieceSize) ([]abi.UnpaddedPieceSize, error) {
 	return out, nil
 }
 
+func FillersFromRem(in abi.UnpaddedPieceSize) ([]abi.UnpaddedPieceSize, error) {
+	return fillersFromRem(in)
+}
+
 func (m *Sealing) ListSectors() ([]SectorInfo, error) {
 	var sectors []SectorInfo
 	if err := m.sectors.List(&sectors); err != nil {
