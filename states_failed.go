@@ -1,8 +1,10 @@
 package sealing
 
 import (
+	"context"
 	"time"
 
+	"github.com/filecoin-project/go-address"
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-statemachine"
@@ -35,6 +37,22 @@ func (m *Sealing) checkPreCommitted(ctx statemachine.Context, sector SectorInfo)
 	}
 
 	info, err := m.api.StateSectorPreCommitInfo(ctx.Context(), m.maddr, sector.SectorNumber, tok)
+	if err != nil {
+		log.Errorf("handleSealPrecommit1Failed(%d): temp error: %+v", sector.SectorNumber, err)
+		return nil, true
+	}
+
+	return info, false
+}
+
+func CheckPreCommitted(ctx context.Context, api SealingAPI, maddr address.Address, sector SectorInfo) (*miner.SectorPreCommitOnChainInfo, bool) {
+	tok, _, err := api.ChainHead(ctx)
+	if err != nil {
+		log.Errorf("handleSealPrecommit1Failed(%d): temp error: %+v", sector.SectorNumber, err)
+		return nil, true
+	}
+
+	info, err := api.StateSectorPreCommitInfo(ctx, maddr, sector.SectorNumber, tok)
 	if err != nil {
 		log.Errorf("handleSealPrecommit1Failed(%d): temp error: %+v", sector.SectorNumber, err)
 		return nil, true
