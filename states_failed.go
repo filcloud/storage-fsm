@@ -6,6 +6,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-statemachine"
+	"github.com/filecoin-project/specs-actors/actors/builtin"
 	"github.com/filecoin-project/specs-actors/actors/builtin/miner"
 )
 
@@ -56,7 +57,7 @@ func (m *Sealing) handleSealPrecommit2Failed(ctx statemachine.Context, sector Se
 		return err
 	}
 
-	if sector.PreCommit2Fails > 1 {
+	if int64(sector.PreCommit2Fails) * int64(minRetryTime) >= int64(SealRandomnessLookbackLimit(sector.SectorType)) * builtin.EpochDurationSeconds * int64(time.Second) / 2 {
 		return ctx.Send(SectorRetrySealPreCommit1{})
 	}
 

@@ -382,7 +382,7 @@ func (t *SectorInfo) MarshalCBOR(w io.Writer) error {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write([]byte{180}); err != nil {
+	if _, err := w.Write([]byte{183}); err != nil {
 		return err
 	}
 
@@ -537,6 +537,22 @@ func (t *SectorInfo) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 	if _, err := w.Write(t.PreCommit1Out); err != nil {
+		return err
+	}
+
+	// t.PreviousPreCommit1Out (bool) (bool)
+	if len("PreviousPreCommit1Out") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PreviousPreCommit1Out\" was too long")
+	}
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajTextString, uint64(len("PreviousPreCommit1Out")))); err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte("PreviousPreCommit1Out")); err != nil {
+		return err
+	}
+
+	if err := cbg.WriteBool(w, t.PreviousPreCommit1Out); err != nil {
 		return err
 	}
 
@@ -711,6 +727,45 @@ func (t *SectorInfo) MarshalCBOR(w io.Writer) error {
 		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.SeedEpoch)-1)); err != nil {
 			return err
 		}
+	}
+
+	// t.Commit1Out ([]uint8) (slice)
+	if len("Commit1Out") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"Commit1Out\" was too long")
+	}
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajTextString, uint64(len("Commit1Out")))); err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte("Commit1Out")); err != nil {
+		return err
+	}
+
+	if len(t.Commit1Out) > cbg.ByteArrayMaxLen {
+		return xerrors.Errorf("Byte array in field t.Commit1Out was too long")
+	}
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajByteString, uint64(len(t.Commit1Out)))); err != nil {
+		return err
+	}
+	if _, err := w.Write(t.Commit1Out); err != nil {
+		return err
+	}
+
+	// t.PreviousCommit1Out (bool) (bool)
+	if len("PreviousCommit1Out") > cbg.MaxLength {
+		return xerrors.Errorf("Value in field \"PreviousCommit1Out\" was too long")
+	}
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajTextString, uint64(len("PreviousCommit1Out")))); err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte("PreviousCommit1Out")); err != nil {
+		return err
+	}
+
+	if err := cbg.WriteBool(w, t.PreviousCommit1Out); err != nil {
+		return err
 	}
 
 	// t.CommitMessage (cid.Cid) (struct)
@@ -997,6 +1052,24 @@ func (t *SectorInfo) UnmarshalCBOR(r io.Reader) error {
 			if _, err := io.ReadFull(br, t.PreCommit1Out); err != nil {
 				return err
 			}
+			// t.PreviousPreCommit1Out (bool) (bool)
+		case "PreviousPreCommit1Out":
+
+			maj, extra, err = cbg.CborReadHeader(br)
+			if err != nil {
+				return err
+			}
+			if maj != cbg.MajOther {
+				return fmt.Errorf("booleans must be major type 7")
+			}
+			switch extra {
+			case 20:
+				t.PreviousPreCommit1Out = false
+			case 21:
+				t.PreviousPreCommit1Out = true
+			default:
+				return fmt.Errorf("booleans are either major type 7, value 20 or 21 (got %d)", extra)
+			}
 			// t.CommD (cid.Cid) (struct)
 		case "CommD":
 
@@ -1166,6 +1239,42 @@ func (t *SectorInfo) UnmarshalCBOR(r io.Reader) error {
 				}
 
 				t.SeedEpoch = abi.ChainEpoch(extraI)
+			}
+			// t.Commit1Out ([]uint8) (slice)
+		case "Commit1Out":
+
+			maj, extra, err = cbg.CborReadHeader(br)
+			if err != nil {
+				return err
+			}
+
+			if extra > cbg.ByteArrayMaxLen {
+				return fmt.Errorf("t.Commit1Out: byte array too large (%d)", extra)
+			}
+			if maj != cbg.MajByteString {
+				return fmt.Errorf("expected byte array")
+			}
+			t.Commit1Out = make([]byte, extra)
+			if _, err := io.ReadFull(br, t.Commit1Out); err != nil {
+				return err
+			}
+			// t.PreviousCommit1Out (bool) (bool)
+		case "PreviousCommit1Out":
+
+			maj, extra, err = cbg.CborReadHeader(br)
+			if err != nil {
+				return err
+			}
+			if maj != cbg.MajOther {
+				return fmt.Errorf("booleans must be major type 7")
+			}
+			switch extra {
+			case 20:
+				t.PreviousCommit1Out = false
+			case 21:
+				t.PreviousCommit1Out = true
+			default:
+				return fmt.Errorf("booleans are either major type 7, value 20 or 21 (got %d)", extra)
 			}
 			// t.CommitMessage (cid.Cid) (struct)
 		case "CommitMessage":
