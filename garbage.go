@@ -38,49 +38,75 @@ func (m *Sealing) pledgeSector(ctx context.Context, sectorID abi.SectorID, exist
 	return out, nil
 }
 
-func (m *Sealing) PledgeSector() error {
+func (m *Sealing) pledgeSectorUseExisting(ctx context.Context, sectorID abi.SectorID) ([]abi.PieceInfo, error) {
+	log.Infof("Pledge %d using existing", sectorID)
+
+	size := abi.PaddedPieceSize(m.sealer.SectorSize()).Unpadded()
+
+	// Here size 0 means using existing unsealed sector
+	ppi, err := m.sealer.AddPiece(ctx, sectorID, []abi.UnpaddedPieceSize{}, 0, m.pledgeReader(size))
+	if err != nil {
+		return nil, xerrors.Errorf("add piece using existing: %w", err)
+	}
+	return []abi.PieceInfo{
+		{Size: ppi.Size, PieceCID: ppi.PieceCID},
+	}, nil
+}
+
+func (m *Sealing) PledgeSector(useExisting ...bool) error {
 	go func() {
-		ctx := context.TODO() // we can't use the context from command which invokes
-		// this, as we run everything here async, and it's cancelled when the
-		// command exits
-
-		size := abi.PaddedPieceSize(m.sealer.SectorSize()).Unpadded()
-
-		rt, err := ffiwrapper.SealProofTypeFromSectorSize(m.sealer.SectorSize())
-		if err != nil {
-			log.Error(err)
-			return
-		}
-
-		sid, err := m.sc.Next()
-		if err != nil {
-			log.Errorf("%+v", err)
-			return
-		}
-		err = m.sealer.NewSector(ctx, m.minerSector(sid))
-		if err != nil {
-			log.Errorf("%+v", err)
-			return
-		}
-
-		pieces, err := m.pledgeSector(ctx, m.minerSector(sid), []abi.UnpaddedPieceSize{}, size)
-		if err != nil {
-			log.Errorf("%+v", err)
-			return
-		}
-
-		ps := make([]Piece, len(pieces))
-		for idx := range ps {
-			ps[idx] = Piece{
-				Piece:    pieces[idx],
-				DealInfo: nil,
-			}
-		}
-
-		if err := m.newSector(sid, rt, ps); err != nil {
-			log.Errorf("%+v", err)
-			return
-		}
+		_ = m.PledgeSectorSync(useExisting...)
 	}()
+	return nil
+}
+
+func (m *Sealing) PledgeSectorSync(useExisting ...bool) error {
+	ctx := context.TODO() // we can't use the context from command which invokes
+	// this, as we run everything here async, and it's cancelled when the
+	// command exits
+
+	size := abi.PaddedPieceSize(m.sealer.SectorSize()).Unpadded()
+
+	rt, err := ffiwrapper.SealProofTypeFromSectorSize(m.sealer.SectorSize())
+	if err != nil {
+		log.Error(err)
+		return err
+	}
+
+	sid, err := m.sc.Next()
+	if err != nil {
+		log.Errorf("%+v", err)
+		return err
+	}
+	err = m.sealer.NewSector(ctx, m.minerSector(sid))
+	if err != nil {
+		log.Errorf("%+v", err)
+		return err
+	}
+
+	var pieces []abi.PieceInfo
+	if len(useExisting) > 0 && useExisting[0] {
+		pieces, err = m.pledgeSectorUseExisting(ctx, m.minerSector(sid))
+	} else {
+		pieces, err = m.pledgeSector(ctx, m.minerSector(sid), []abi.UnpaddedPieceSize{}, size)
+	}
+	if err != nil {
+		log.Errorf("%+v", err)
+		return err
+	}
+
+	ps := make([]Piece, len(pieces))
+	for idx := range ps {
+		ps[idx] = Piece{
+			Piece:    pieces[idx],
+			DealInfo: nil,
+		}
+	}
+
+	if err := m.newSector(sid, rt, ps); err != nil {
+		log.Errorf("%+v", err)
+		return err
+	}
+
 	return nil
 }
