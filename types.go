@@ -72,6 +72,9 @@ type SectorInfo struct {
 	SeedValue abi.InteractiveSealRandomness
 	SeedEpoch abi.ChainEpoch
 
+	// Commit1
+	Commit1Out []byte
+
 	// Committing
 	CommitMessage *cid.Cid
 	InvalidProofs uint64 // failed proof computations (doesn't validate with proof inputs)

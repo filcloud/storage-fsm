@@ -79,28 +79,24 @@ func (m *Sealing) handlePreCommit1(ctx statemachine.Context, sector SectorInfo) 
 	}
 	ticketValue := abi.SealRandomness(rand)
 
-	pc1o, err := m.sealer.SealPreCommit1(ctx.Context(), m.minerSector(sector.SectorNumber), ticketValue, sector.pieceInfos())
+	err = m.sealer.SealPreCommit1(ctx.Context(), m.minerSector(sector.SectorNumber), ticketValue, sector.pieceInfos())
 	if err != nil {
 		return ctx.Send(SectorSealPreCommitFailed{xerrors.Errorf("seal pre commit(1) failed: %w", err)})
 	}
 
 	return ctx.Send(SectorPreCommit1{
-		PreCommit1Out: pc1o,
 		TicketValue:   ticketValue,
 		TicketEpoch:   ticketEpoch,
 	})
 }
 
 func (m *Sealing) handlePreCommit2(ctx statemachine.Context, sector SectorInfo) error {
-	cids, err := m.sealer.SealPreCommit2(ctx.Context(), m.minerSector(sector.SectorNumber), sector.PreCommit1Out)
+	err := m.sealer.SealPreCommit2(ctx.Context(), m.minerSector(sector.SectorNumber), sector.PreCommit1Out)
 	if err != nil {
 		return ctx.Send(SectorSealPreCommitFailed{xerrors.Errorf("seal pre commit(2) failed: %w", err)})
 	}
 
-	return ctx.Send(SectorPreCommit2{
-		Unsealed: cids.Unsealed,
-		Sealed:   cids.Sealed,
-	})
+	return ctx.Send(SectorPreCommit2{})
 }
 
 func (m *Sealing) handlePreCommitting(ctx statemachine.Context, sector SectorInfo) error {
@@ -209,7 +205,7 @@ func (m *Sealing) handleWaitSeed(ctx statemachine.Context, sector SectorInfo) er
 	return nil
 }
 
-func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) error {
+func (m *Sealing) handleCommit1(ctx statemachine.Context, sector SectorInfo) error {
 	log.Info("scheduling seal proof computation...")
 
 	log.Infof("KOMIT %d %x(%d); %x(%d); %v; r:%x; d:%x", sector.SectorNumber, sector.TicketValue, sector.TicketEpoch, sector.SeedValue, sector.SeedEpoch, sector.pieceInfos(), sector.CommR, sector.CommD)
@@ -218,23 +214,31 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 		Unsealed: *sector.CommD,
 		Sealed:   *sector.CommR,
 	}
-	c2in, err := m.sealer.SealCommit1(ctx.Context(), m.minerSector(sector.SectorNumber), sector.TicketValue, sector.SeedValue, sector.pieceInfos(), cids)
+	err := m.sealer.SealCommit1(ctx.Context(), m.minerSector(sector.SectorNumber), sector.TicketValue, sector.SeedValue, sector.pieceInfos(), cids)
 	if err != nil {
 		return ctx.Send(SectorComputeProofFailed{xerrors.Errorf("computing seal proof failed: %w", err)})
 	}
 
-	proof, err := m.sealer.SealCommit2(ctx.Context(), m.minerSector(sector.SectorNumber), c2in)
+	return ctx.Send(SectorCommit1{})
+}
+
+func (m *Sealing) handleCommit2(ctx statemachine.Context, sector SectorInfo) error {
+	err := m.sealer.SealCommit2(ctx.Context(), m.minerSector(sector.SectorNumber), sector.Commit1Out)
 	if err != nil {
 		return ctx.Send(SectorComputeProofFailed{xerrors.Errorf("computing seal proof failed: %w", err)})
 	}
 
+	return ctx.Send(SectorCommit2{})
+}
+
+func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) error {
 	tok, _, err := m.api.ChainHead(ctx.Context())
 	if err != nil {
 		log.Errorf("handleCommitting: api error, not proceeding: %+v", err)
 		return nil
 	}
 
-	if err := m.checkCommit(ctx.Context(), sector, proof, tok); err != nil {
+	if err := m.checkCommit(ctx.Context(), sector, sector.Proof, tok); err != nil {
 		return ctx.Send(SectorCommitFailed{xerrors.Errorf("commit check error: %w", err)})
 	}
 
@@ -242,7 +246,7 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 
 	params := &miner.ProveCommitSectorParams{
 		SectorNumber: sector.SectorNumber,
-		Proof:        proof,
+		Proof:        sector.Proof,
 	}
 
 	enc := new(bytes.Buffer)
@@ -268,7 +272,6 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 	}
 
 	return ctx.Send(SectorCommitted{
-		Proof:   proof,
 		Message: mcid,
 	})
 }
